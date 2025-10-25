@@ -608,7 +608,7 @@ err = userRepo.Update(ctx, &user)
 err = userRepo.Delete(ctx, user.ID)
 
 // Batch Operations
-users := []*User{{Name: "Alice"}, {Name: "Bob"}}
+users := []*User{% raw %}{{Name: "Alice"}, {Name: "Bob"}}{% endraw %}
 err = userRepo.CreateBatch(ctx, users)
 err = userRepo.UpdateBatch(ctx, users)
 ```
