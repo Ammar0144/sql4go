@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"strings"
 
-	"sql4go/pkg/db"
-	"sql4go/pkg/redis"
+	"github.com/ammar0144/sql4go/pkg/db"
+	"github.com/ammar0144/sql4go/pkg/redis"
 
 	"github.com/cespare/xxhash/v2"
 	"gorm.io/gorm"

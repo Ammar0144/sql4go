@@ -3,9 +3,9 @@
 package sql4go
 
 import (
-	"sql4go/pkg/db"
-	"sql4go/pkg/redis"
-	"sql4go/pkg/repository"
+	"github.com/ammar0144/sql4go/pkg/db"
+	"github.com/ammar0144/sql4go/pkg/redis"
+	"github.com/ammar0144/sql4go/pkg/repository"
 )
 
 // Config represents database configuration
