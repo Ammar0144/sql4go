@@ -48,6 +48,9 @@ coverage.html
 
 # Debug files
 debug
+
+# Project specific ignored folders
+ignored_folder/
 __debug_bin
 
 # MacOS specific
