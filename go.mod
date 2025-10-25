@@ -1,4 +1,4 @@
-module sql4go
+module github.com/Ammar0144/sql4go
 
 go 1.23.4
 
