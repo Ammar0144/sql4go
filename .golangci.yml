@@ -1,0 +1,25 @@
+run:
+  timeout: 5m
+  go: '1.23'
+
+linters:
+  enable:
+    - errcheck
+    - gofmt
+    - goimports
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosimple
+
+linters-settings:
+  staticcheck:
+    checks: ["all", "-SA9003"] # Disable empty branch warnings (intentional for cache best-effort pattern)
+
+issues:
+  exclude-rules:
+    # Exclude SA4010 for map append operations (false positives)
+    - linters:
+        - staticcheck
+      text: "SA4010.*append"

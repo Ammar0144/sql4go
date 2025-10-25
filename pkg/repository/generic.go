@@ -126,9 +126,8 @@ func (r *GenericRepository[T]) FindByID(ctx context.Context, id interface{}) (*T
 		var entity T
 		if err := r.redis.GetJSON(ctx, cacheKey, &entity); err == nil {
 			return &entity, nil
-		} else if !redis.IsKeyNotFound(err) {
-			// Unexpected cache error; continue to DB (best-effort cache)
 		}
+		// Cache miss or error; continue to DB (best-effort cache)
 	}
 
 	// Cache miss - query database (use primary key lookup to avoid injecting column names)
@@ -264,9 +263,8 @@ func (r *GenericRepository[T]) First(ctx context.Context, query interface{}, arg
 		var entity T
 		if err := r.redis.GetJSON(ctx, cacheKey, &entity); err == nil {
 			return &entity, nil
-		} else if !redis.IsKeyNotFound(err) {
-			// Unexpected cache error; continue to DB
 		}
+		// Cache miss or error; continue to DB
 	}
 
 	// Cache miss - query database
