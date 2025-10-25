@@ -143,7 +143,7 @@ func (r *GenericRepository[T]) FindByID(ctx context.Context, id interface{}) (*T
 
 	// Cache the result
 	if r.redis != nil {
-		r.redis.SetJSON(ctx, cacheKey, entity)
+		_ = r.redis.SetJSON(ctx, cacheKey, entity) // Ignore cache errors on write
 	}
 
 	return &entity, nil
@@ -167,9 +167,8 @@ func (r *GenericRepository[T]) FindAll(ctx context.Context) ([]T, error) {
 		var entities []T
 		if err := r.redis.GetLargeJSON(ctx, cacheKey, &entities); err == nil {
 			return entities, nil
-		} else if !redis.IsKeyNotFound(err) {
-			// Unexpected cache error; continue to DB
 		}
+		// Cache miss or error; continue to DB
 	}
 
 	// Cache miss - query database
@@ -181,7 +180,7 @@ func (r *GenericRepository[T]) FindAll(ctx context.Context) ([]T, error) {
 
 	// Cache the result
 	if r.redis != nil {
-		r.redis.SetLargeJSON(ctx, cacheKey, entities)
+		_ = r.redis.SetLargeJSON(ctx, cacheKey, entities) // Ignore cache errors on write
 	}
 
 	return entities, nil
@@ -215,9 +214,8 @@ func (r *GenericRepository[T]) FindWhere(ctx context.Context, query interface{},
 		var entities []T
 		if err := r.redis.GetLargeJSON(ctx, cacheKey, &entities); err == nil {
 			return entities, nil
-		} else if !redis.IsKeyNotFound(err) {
-			// Unexpected cache error; continue to DB
 		}
+		// Cache miss or error; continue to DB
 	}
 
 	// Cache miss - query database
@@ -283,7 +281,7 @@ func (r *GenericRepository[T]) First(ctx context.Context, query interface{}, arg
 
 	// Cache the result (only if cacheable)
 	if r.redis != nil && shouldCache {
-		r.redis.SetJSON(ctx, cacheKey, entity)
+		_ = r.redis.SetJSON(ctx, cacheKey, entity) // Ignore cache errors on write
 	}
 
 	return &entity, nil
@@ -307,9 +305,8 @@ func (r *GenericRepository[T]) Count(ctx context.Context) (int64, error) {
 		var count int64
 		if err := r.redis.GetJSON(ctx, cacheKey, &count); err == nil {
 			return count, nil
-		} else if !redis.IsKeyNotFound(err) {
-			// Unexpected cache error; continue to DB
 		}
+		// Cache miss or error; continue to DB
 	}
 
 	// Cache miss - query database
@@ -322,7 +319,7 @@ func (r *GenericRepository[T]) Count(ctx context.Context) (int64, error) {
 
 	// Cache the result
 	if r.redis != nil {
-		r.redis.SetJSON(ctx, cacheKey, count)
+		_ = r.redis.SetJSON(ctx, cacheKey, count) // Ignore cache errors on write
 	}
 
 	return count, nil
@@ -543,9 +540,9 @@ func (r *GenericRepository[T]) WarmCache(ctx context.Context) error {
 		return nil
 	}
 
-	// Warm up common queries
-	r.FindAll(ctx) // Cache all entities
-	r.Count(ctx)   // Cache count
+	// Warm up common queries (ignore errors)
+	_, _ = r.FindAll(ctx) // Cache all entities
+	_, _ = r.Count(ctx)   // Cache count
 
 	return nil
 }
@@ -668,10 +665,10 @@ func (r *GenericRepository[T]) extractDependenciesFromEntities(entities []T) map
 // invalidateEntityCaches handles cache invalidation for entity changes
 func (r *GenericRepository[T]) invalidateEntityCaches(ctx context.Context, entity T) {
 	// Invalidate all caches for this entity type
-	r.InvalidateCache(ctx)
+	_ = r.InvalidateCache(ctx) // Ignore cache errors on invalidation
 
 	// Invalidate specific entity dependencies
-	r.redis.InvalidateEntityDependencies(ctx, r.tableName, entity.GetPrimaryKeyValue())
+	_ = r.redis.InvalidateEntityDependencies(ctx, r.tableName, entity.GetPrimaryKeyValue())
 
 	// Handle relationship-aware invalidation
 	var relationships map[string][]RelatedEntity
@@ -688,7 +685,7 @@ func (r *GenericRepository[T]) invalidateEntityCaches(ctx context.Context, entit
 	for _, relatedEntities := range relationships {
 		for _, related := range relatedEntities {
 			if related.EntityID != nil {
-				r.redis.InvalidateEntityDependencies(ctx, related.EntityType, related.EntityID)
+				_ = r.redis.InvalidateEntityDependencies(ctx, related.EntityType, related.EntityID)
 			}
 		}
 	}
