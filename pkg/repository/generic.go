@@ -103,10 +103,10 @@ func (r *GenericRepository[T]) withQueryTimeout(ctx context.Context) (context.Co
 // ============================================================================
 
 // FindByID finds a record by ID with cache-first strategy
-func (r *GenericRepository[T]) FindByID(ctx context.Context, id interface{}) (*T, error) {
+func (r *GenericRepository[T]) FindByID(ctx context.Context, id interface{}) (*T, bool, bool, error) {
 	// Input validation
 	if id == nil {
-		return nil, fmt.Errorf("id cannot be nil")
+		return nil, false, false, fmt.Errorf("id cannot be nil")
 	}
 
 	// Apply query timeout
@@ -115,7 +115,7 @@ func (r *GenericRepository[T]) FindByID(ctx context.Context, id interface{}) (*T
 
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled before operation: %w", err)
+		return nil, false, false, fmt.Errorf("context cancelled before operation: %w", err)
 	}
 
 	// Generate cache key
@@ -124,10 +124,11 @@ func (r *GenericRepository[T]) FindByID(ctx context.Context, id interface{}) (*T
 	// Try cache first
 	if r.redis != nil {
 		var entity T
-		if err := r.redis.GetJSON(ctx, cacheKey, &entity); err == nil {
-			return &entity, nil
+		if err := r.redis.GetValue(ctx, cacheKey, &entity); err == nil {
+			return &entity, true, false, nil // Cache hit
+		} else if !redis.IsKeyNotFound(err) {
+			// Unexpected cache error; continue to DB (best-effort cache)
 		}
-		// Cache miss or error; continue to DB (best-effort cache)
 	}
 
 	// Cache miss - query database (use primary key lookup to avoid injecting column names)
@@ -135,28 +136,32 @@ func (r *GenericRepository[T]) FindByID(ctx context.Context, id interface{}) (*T
 	result := r.db.WithContext(ctx).First(&entity, id)
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
-			return nil, nil
+			return nil, false, false, nil // Not found, not an error
 		}
-		return nil, fmt.Errorf("database error: %w", result.Error)
+		return nil, false, false, fmt.Errorf("database error: %w", result.Error)
 	}
 
 	// Cache the result
+	cacheStored := false
 	if r.redis != nil {
-		_ = r.redis.SetJSON(ctx, cacheKey, entity) // Ignore cache errors on write
+		if err := r.redis.SetValue(ctx, cacheKey, entity); err == nil {
+			cacheStored = true
+		}
+		// Ignore cache errors - best effort
 	}
 
-	return &entity, nil
+	return &entity, false, cacheStored, nil // From DB, cacheStored status
 }
 
 // FindAll finds all records with caching
-func (r *GenericRepository[T]) FindAll(ctx context.Context) ([]T, error) {
+func (r *GenericRepository[T]) FindAll(ctx context.Context) ([]T, bool, bool, error) {
 	// Apply query timeout
 	ctx, cancel := r.withQueryTimeout(ctx)
 	defer cancel()
 
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled before operation: %w", err)
+		return nil, false, false, fmt.Errorf("context cancelled before operation: %w", err)
 	}
 
 	cacheKey := r.generateCacheKey("find_all", "")
@@ -164,36 +169,41 @@ func (r *GenericRepository[T]) FindAll(ctx context.Context) ([]T, error) {
 	// Try cache first
 	if r.redis != nil {
 		var entities []T
-		if err := r.redis.GetLargeJSON(ctx, cacheKey, &entities); err == nil {
-			return entities, nil
+		if err := r.redis.GetLargeValue(ctx, cacheKey, &entities); err == nil {
+			return entities, true, false, nil // Cache hit
+		} else if !redis.IsKeyNotFound(err) {
+			// Unexpected cache error; continue to DB
 		}
-		// Cache miss or error; continue to DB
 	}
 
 	// Cache miss - query database
 	var entities []T
 	result := r.db.WithContext(ctx).Find(&entities)
 	if result.Error != nil {
-		return nil, fmt.Errorf("database error: %w", result.Error)
+		return nil, false, false, fmt.Errorf("database error: %w", result.Error)
 	}
 
 	// Cache the result
+	cacheStored := false
 	if r.redis != nil {
-		_ = r.redis.SetLargeJSON(ctx, cacheKey, entities) // Ignore cache errors on write
+		if err := r.redis.SetLargeValue(ctx, cacheKey, entities); err == nil {
+			cacheStored = true
+		}
+		// Ignore cache errors - best effort
 	}
 
-	return entities, nil
+	return entities, false, cacheStored, nil // From DB, cacheStored status
 }
 
 // FindWhere finds records with conditions and caching
-func (r *GenericRepository[T]) FindWhere(ctx context.Context, query interface{}, args ...interface{}) ([]T, error) {
+func (r *GenericRepository[T]) FindWhere(ctx context.Context, query interface{}, args ...interface{}) ([]T, bool, bool, error) {
 	// Apply query timeout
 	ctx, cancel := r.withQueryTimeout(ctx)
 	defer cancel()
 
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled before operation: %w", err)
+		return nil, false, false, fmt.Errorf("context cancelled before operation: %w", err)
 	}
 
 	// Validate query type - don't cache *gorm.DB queries as they're not deterministic
@@ -211,40 +221,44 @@ func (r *GenericRepository[T]) FindWhere(ctx context.Context, query interface{},
 	// Try cache first (only if cacheable)
 	if r.redis != nil && shouldCache {
 		var entities []T
-		if err := r.redis.GetLargeJSON(ctx, cacheKey, &entities); err == nil {
-			return entities, nil
+		if err := r.redis.GetLargeValue(ctx, cacheKey, &entities); err == nil {
+			return entities, true, false, nil // Cache hit
+		} else if !redis.IsKeyNotFound(err) {
+			// Unexpected cache error; continue to DB
 		}
-		// Cache miss or error; continue to DB
 	}
 
 	// Cache miss - query database
 	var entities []T
 	result := r.db.WithContext(ctx).Where(query, args...).Find(&entities)
 	if result.Error != nil {
-		return nil, fmt.Errorf("database error: %w", result.Error)
+		return nil, false, false, fmt.Errorf("database error: %w", result.Error)
 	}
 
 	// Cache the result with dependencies (only if cacheable)
+	cacheStored := false
 	if r.redis != nil && shouldCache {
 		dependencies := r.extractDependenciesFromEntities(entities)
 		if data, err := r.marshalEntities(entities); err == nil {
 			// best-effort cache store; ignore cache errors here
-			_ = r.redis.SetLargeWithDependencies(ctx, cacheKey, data, dependencies)
+			if err := r.redis.SetLargeWithDependencies(ctx, cacheKey, data, dependencies); err == nil {
+				cacheStored = true
+			}
 		}
 	}
 
-	return entities, nil
+	return entities, false, cacheStored, nil // From DB, cacheStored status
 }
 
 // First finds the first record matching conditions
-func (r *GenericRepository[T]) First(ctx context.Context, query interface{}, args ...interface{}) (*T, error) {
+func (r *GenericRepository[T]) First(ctx context.Context, query interface{}, args ...interface{}) (*T, bool, bool, error) {
 	// Apply query timeout
 	ctx, cancel := r.withQueryTimeout(ctx)
 	defer cancel()
 
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled before operation: %w", err)
+		return nil, false, false, fmt.Errorf("context cancelled before operation: %w", err)
 	}
 
 	// Validate query type - don't cache *gorm.DB queries
@@ -261,10 +275,11 @@ func (r *GenericRepository[T]) First(ctx context.Context, query interface{}, arg
 	// Try cache first (only if cacheable)
 	if r.redis != nil && shouldCache {
 		var entity T
-		if err := r.redis.GetJSON(ctx, cacheKey, &entity); err == nil {
-			return &entity, nil
+		if err := r.redis.GetValue(ctx, cacheKey, &entity); err == nil {
+			return &entity, true, false, nil // Cache hit
+		} else if !redis.IsKeyNotFound(err) {
+			// Unexpected cache error; continue to DB
 		}
-		// Cache miss or error; continue to DB
 	}
 
 	// Cache miss - query database
@@ -272,28 +287,32 @@ func (r *GenericRepository[T]) First(ctx context.Context, query interface{}, arg
 	result := r.db.WithContext(ctx).Where(query, args...).First(&entity)
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
-			return nil, nil
+			return nil, false, false, nil // Not found, not an error
 		}
-		return nil, fmt.Errorf("database error: %w", result.Error)
+		return nil, false, false, fmt.Errorf("database error: %w", result.Error)
 	}
 
 	// Cache the result (only if cacheable)
+	cacheStored := false
 	if r.redis != nil && shouldCache {
-		_ = r.redis.SetJSON(ctx, cacheKey, entity) // Ignore cache errors on write
+		if err := r.redis.SetValue(ctx, cacheKey, entity); err == nil {
+			cacheStored = true
+		}
+		// Ignore cache errors - best effort
 	}
 
-	return &entity, nil
+	return &entity, false, cacheStored, nil // From DB, cacheStored status
 }
 
 // Count counts records with caching
-func (r *GenericRepository[T]) Count(ctx context.Context) (int64, error) {
+func (r *GenericRepository[T]) Count(ctx context.Context) (int64, bool, bool, error) {
 	// Apply query timeout
 	ctx, cancel := r.withQueryTimeout(ctx)
 	defer cancel()
 
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
-		return 0, fmt.Errorf("context cancelled before operation: %w", err)
+		return 0, false, false, fmt.Errorf("context cancelled before operation: %w", err)
 	}
 
 	cacheKey := r.generateCacheKey("count", "")
@@ -301,10 +320,11 @@ func (r *GenericRepository[T]) Count(ctx context.Context) (int64, error) {
 	// Try cache first
 	if r.redis != nil {
 		var count int64
-		if err := r.redis.GetJSON(ctx, cacheKey, &count); err == nil {
-			return count, nil
+		if err := r.redis.GetValue(ctx, cacheKey, &count); err == nil {
+			return count, true, false, nil // Cache hit
+		} else if !redis.IsKeyNotFound(err) {
+			// Unexpected cache error; continue to DB
 		}
-		// Cache miss or error; continue to DB
 	}
 
 	// Cache miss - query database
@@ -312,24 +332,28 @@ func (r *GenericRepository[T]) Count(ctx context.Context) (int64, error) {
 	var entity T
 	result := r.db.WithContext(ctx).Model(&entity).Count(&count)
 	if result.Error != nil {
-		return 0, fmt.Errorf("database error: %w", result.Error)
+		return 0, false, false, fmt.Errorf("database error: %w", result.Error)
 	}
 
 	// Cache the result
+	cacheStored := false
 	if r.redis != nil {
-		_ = r.redis.SetJSON(ctx, cacheKey, count) // Ignore cache errors on write
+		if err := r.redis.SetValue(ctx, cacheKey, count); err == nil {
+			cacheStored = true
+		}
+		// Ignore cache errors - best effort
 	}
 
-	return count, nil
+	return count, false, cacheStored, nil // From DB, cacheStored status
 }
 
 // Exists checks if a record exists by ID
-func (r *GenericRepository[T]) Exists(ctx context.Context, id interface{}) (bool, error) {
-	entity, err := r.FindByID(ctx, id)
+func (r *GenericRepository[T]) Exists(ctx context.Context, id interface{}) (bool, bool, bool, error) {
+	entity, cacheHit, cacheStored, err := r.FindByID(ctx, id)
 	if err != nil {
-		return false, err
+		return false, false, false, err
 	}
-	return entity != nil, nil
+	return entity != nil, cacheHit, cacheStored, nil
 }
 
 // ============================================================================
@@ -386,10 +410,10 @@ func (r *GenericRepository[T]) Offset(ctx context.Context, offset int) Repositor
 // ============================================================================
 
 // Create creates a new record with automatic cache invalidation
-func (r *GenericRepository[T]) Create(ctx context.Context, entity *T) error {
+func (r *GenericRepository[T]) Create(ctx context.Context, entity *T) (bool, error) {
 	// Input validation
 	if entity == nil {
-		return fmt.Errorf("entity cannot be nil")
+		return false, fmt.Errorf("entity cannot be nil")
 	}
 
 	// Apply query timeout
@@ -398,22 +422,24 @@ func (r *GenericRepository[T]) Create(ctx context.Context, entity *T) error {
 
 	// Execute database operation
 	if err := r.db.WithContext(ctx).Create(entity).Error; err != nil {
-		return fmt.Errorf("database error: %w", err)
+		return false, fmt.Errorf("database error: %w", err)
 	}
 
 	// Invalidate related caches
+	cacheInvalidated := false
 	if r.redis != nil {
 		r.invalidateEntityCaches(ctx, *entity)
+		cacheInvalidated = true // Best effort - assume success
 	}
 
-	return nil
+	return cacheInvalidated, nil
 }
 
 // Update updates a record with relationship-aware cache invalidation
-func (r *GenericRepository[T]) Update(ctx context.Context, entity *T) error {
+func (r *GenericRepository[T]) Update(ctx context.Context, entity *T) (bool, error) {
 	// Input validation
 	if entity == nil {
-		return fmt.Errorf("entity cannot be nil")
+		return false, fmt.Errorf("entity cannot be nil")
 	}
 
 	// Apply query timeout
@@ -422,22 +448,24 @@ func (r *GenericRepository[T]) Update(ctx context.Context, entity *T) error {
 
 	// Execute database operation
 	if err := r.db.WithContext(ctx).Save(entity).Error; err != nil {
-		return fmt.Errorf("database error: %w", err)
+		return false, fmt.Errorf("database error: %w", err)
 	}
 
 	// Invalidate related caches
+	cacheInvalidated := false
 	if r.redis != nil {
 		r.invalidateEntityCaches(ctx, *entity)
+		cacheInvalidated = true // Best effort - assume success
 	}
 
-	return nil
+	return cacheInvalidated, nil
 }
 
 // Delete deletes a record by ID with cache invalidation
-func (r *GenericRepository[T]) Delete(ctx context.Context, id interface{}) error {
+func (r *GenericRepository[T]) Delete(ctx context.Context, id interface{}) (bool, error) {
 	// Input validation
 	if id == nil {
-		return fmt.Errorf("id cannot be nil")
+		return false, fmt.Errorf("id cannot be nil")
 	}
 
 	// Apply query timeout
@@ -449,22 +477,24 @@ func (r *GenericRepository[T]) Delete(ctx context.Context, id interface{}) error
 	var entity T
 	if err := r.db.WithContext(ctx).First(&entity, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil // Entity doesn't exist, no error
+			return false, nil // Entity doesn't exist, no error
 		}
-		return fmt.Errorf("database error while finding entity to delete: %w", err)
+		return false, fmt.Errorf("database error while finding entity to delete: %w", err)
 	}
 
 	// Execute database operation
 	if err := r.db.WithContext(ctx).Delete(&entity).Error; err != nil {
-		return fmt.Errorf("database error: %w", err)
+		return false, fmt.Errorf("database error: %w", err)
 	}
 
 	// Invalidate related caches
+	cacheInvalidated := false
 	if r.redis != nil {
 		r.invalidateEntityCaches(ctx, entity)
+		cacheInvalidated = true // Best effort - assume success
 	}
 
-	return nil
+	return cacheInvalidated, nil
 }
 
 // CreateBatch creates multiple records in batch with cache invalidation
@@ -538,9 +568,9 @@ func (r *GenericRepository[T]) WarmCache(ctx context.Context) error {
 		return nil
 	}
 
-	// Warm up common queries (ignore errors)
-	_, _ = r.FindAll(ctx) // Cache all entities
-	_, _ = r.Count(ctx)   // Cache count
+	// Warm up common queries
+	r.FindAll(ctx) // Cache all entities
+	r.Count(ctx)   // Cache count
 
 	return nil
 }
@@ -663,10 +693,10 @@ func (r *GenericRepository[T]) extractDependenciesFromEntities(entities []T) map
 // invalidateEntityCaches handles cache invalidation for entity changes
 func (r *GenericRepository[T]) invalidateEntityCaches(ctx context.Context, entity T) {
 	// Invalidate all caches for this entity type
-	_ = r.InvalidateCache(ctx) // Ignore cache errors on invalidation
+	r.InvalidateCache(ctx)
 
 	// Invalidate specific entity dependencies
-	_ = r.redis.InvalidateEntityDependencies(ctx, r.tableName, entity.GetPrimaryKeyValue())
+	r.redis.InvalidateEntityDependencies(ctx, r.tableName, entity.GetPrimaryKeyValue())
 
 	// Handle relationship-aware invalidation
 	var relationships map[string][]RelatedEntity
@@ -683,7 +713,7 @@ func (r *GenericRepository[T]) invalidateEntityCaches(ctx context.Context, entit
 	for _, relatedEntities := range relationships {
 		for _, related := range relatedEntities {
 			if related.EntityID != nil {
-				_ = r.redis.InvalidateEntityDependencies(ctx, related.EntityType, related.EntityID)
+				r.redis.InvalidateEntityDependencies(ctx, related.EntityType, related.EntityID)
 			}
 		}
 	}

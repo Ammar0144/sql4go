@@ -44,6 +44,11 @@ type Config struct {
 	// Cache Metrics
 	EnableMetrics bool `json:"enable_metrics" yaml:"enable_metrics"`
 
+	// Serialization Format
+	// msgpack: 5-10x faster than JSON, smaller payload (recommended for production)
+	// json: Human-readable, easier debugging (good for development)
+	SerializationFormat SerializationFormat `json:"serialization_format" yaml:"serialization_format"`
+
 	// Cache Logging
 	Logging LoggingConfig `json:"logging" yaml:"logging"`
 
@@ -123,6 +128,14 @@ const (
 	InvalidationAsync     InvalidationStrategy = "async"
 )
 
+// Serialization format enums
+type SerializationFormat string
+
+const (
+	SerializationJSON    SerializationFormat = "json"    // Human-readable, slower
+	SerializationMsgPack SerializationFormat = "msgpack" // Binary, 5-10x faster (recommended)
+)
+
 // DefaultConfig returns a Redis configuration with sensible defaults
 func DefaultConfig() *Config {
 	return &Config{
@@ -156,7 +169,8 @@ func DefaultConfig() *Config {
 			Enabled:       false,
 			WarmUpTimeout: time.Minute * 5,
 		},
-		EnableMetrics: true,
+		EnableMetrics:       true,
+		SerializationFormat: SerializationMsgPack, // Default to MessagePack for best performance
 		Logging: LoggingConfig{
 			LogCacheHits:     false,
 			LogCacheMisses:   true,

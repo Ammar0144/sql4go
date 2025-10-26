@@ -7,12 +7,15 @@ import (
 // Repository defines the generic repository interface
 type Repository[T any] interface {
 	// Queries (Read Operations - Cache-First)
-	FindByID(ctx context.Context, id interface{}) (*T, error)
-	FindAll(ctx context.Context) ([]T, error)
-	FindWhere(ctx context.Context, query interface{}, args ...interface{}) ([]T, error)
-	First(ctx context.Context, query interface{}, args ...interface{}) (*T, error)
-	Count(ctx context.Context) (int64, error)
-	Exists(ctx context.Context, id interface{}) (bool, error)
+	// Returns: (result, cacheHit, cacheStored, error)
+	// - cacheHit: true if data retrieved from Redis cache
+	// - cacheStored: true if data successfully stored to Redis after DB query
+	FindByID(ctx context.Context, id interface{}) (*T, bool, bool, error)
+	FindAll(ctx context.Context) ([]T, bool, bool, error)
+	FindWhere(ctx context.Context, query interface{}, args ...interface{}) ([]T, bool, bool, error)
+	First(ctx context.Context, query interface{}, args ...interface{}) (*T, bool, bool, error)
+	Count(ctx context.Context) (int64, bool, bool, error)
+	Exists(ctx context.Context, id interface{}) (bool, bool, bool, error)
 
 	// GORM Query Methods (Cached)
 	Preload(ctx context.Context, associations ...string) Repository[T]
@@ -22,9 +25,11 @@ type Repository[T any] interface {
 	Offset(ctx context.Context, offset int) Repository[T]
 
 	// Commands (Write Operations - Relationship-Aware Cache Invalidation)
-	Create(ctx context.Context, entity *T) error
-	Update(ctx context.Context, entity *T) error
-	Delete(ctx context.Context, id interface{}) error
+	// Returns: (cacheInvalidated, error)
+	// - cacheInvalidated: true if related caches were successfully invalidated
+	Create(ctx context.Context, entity *T) (bool, error)
+	Update(ctx context.Context, entity *T) (bool, error)
+	Delete(ctx context.Context, id interface{}) (bool, error)
 
 	// Batch Operations
 	CreateBatch(ctx context.Context, entities []*T) error

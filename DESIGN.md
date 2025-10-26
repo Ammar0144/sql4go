@@ -1,9 +1,9 @@
-# GenSQL4Go - Zero-Configuration Cache-Intelligent Database Library
+# Sql4Go - Zero-Configuration Cache-Intelligent Database Library
 
 ## Design Document v3.1 (Production Ready - October 2025)
 
 ### Overview
-GenSQL4Go is a **zero-configuration**, cache-intelligent database abstraction layer built on **GORM** that provides **automatic relationship detection** and **intelligent caching**. It achieves **70% boilerplate reduction** while delivering **10x-100x performance improvements** through smart Redis caching with relationship-aware invalidation.
+Sql4Go is a **zero-configuration**, cache-intelligent database abstraction layer built on **GORM** that provides **automatic relationship detection** and **intelligent caching**. It achieves **70% boilerplate reduction** while delivering **10x-100x performance improvements** through smart Redis caching with relationship-aware invalidation.
 
 **Status**: Production-ready library with 2,554 lines of battle-tested code and validated performance claims.
 
@@ -32,7 +32,7 @@ GenSQL4Go is a **zero-configuration**, cache-intelligent database abstraction la
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                       GENSQL4GO LAYER                          │
+│                       SQL4GO LAYER                          │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
 │  │Repository[User] │  │Repository[Order]│  │Repository[Prof] │  │
 │  │                 │  │                 │  │                 │  │
@@ -114,8 +114,8 @@ type Repository[T Entity] interface {
 }
 
 // 🚀 Single Constructor (Zero Confusion)
-userRepo := gensql4go.NewRepository[User](dbManager, redisManager)    // With cache
-userRepo := gensql4go.NewRepository[User](dbManager, nil)             // Database only
+userRepo := sql4go.NewRepository[User](dbManager, redisManager)    // With cache
+userRepo := sql4go.NewRepository[User](dbManager, nil)             // Database only
 ```
 
 ### 3. Automatic Relationship Detection (Zero Config Magic)
@@ -132,7 +132,7 @@ type Order struct {
     User   User `gorm:"foreignKey:UserID"`          // ✅ Auto-detected as "belongs_to"
 }
 
-// 🤖 GenSQL4Go automatically:
+// 🤖 Sql4Go automatically:
 // 1. Scans GORM tags via reflection
 // 2. Detects relationship types and foreign keys
 // 3. Maps entity dependencies for cache invalidation
@@ -142,21 +142,21 @@ type Order struct {
 ### 4. Cache Strategy (Smart & Configurable)
 ```go
 // 🕰️ App-Level TTL Configuration (30 days recommended)
-redisConfig := &gensql4go.RedisConfig{
+redisConfig := &sql4go.RedisConfig{
     DefaultTTL: time.Hour * 24 * 30,  // 30-day cache
 }
 
 // 🔑 Intelligent Cache Keys
-// Format: gensql4go:{db_name}:{table}:{operation}:{params}
-gensql4go:ecommerce:users:find_by_id:1
-gensql4go:ecommerce:users:find_all
-gensql4go:ecommerce:orders:find_where:a4b2c8d9e1f0  (MD5 hash)
+// Format: sql4go:{db_name}:{table}:{operation}:{params}
+sql4go:ecommerce:users:find_by_id:1
+sql4go:ecommerce:users:find_all
+sql4go:ecommerce:orders:find_where:a4b2c8d9e1f0  (MD5 hash)
 
 // ⚡ Smart Invalidation Patterns
 userRepo.Update(user)  // Automatically invalidates:
-// ✅ gensql4go:ecommerce:users:*                    (direct)
-// ✅ gensql4go:ecommerce:orders:find_by_user_id:*   (related)
-// ✅ gensql4go:ecommerce:profiles:find_by_user_id:* (related)
+// ✅ sql4go:ecommerce:users:*                    (direct)
+// ✅ sql4go:ecommerce:orders:find_by_user_id:*   (related)
+// ✅ sql4go:ecommerce:profiles:find_by_user_id:* (related)
 ```
 
 ### 5. Performance Characteristics
@@ -235,7 +235,7 @@ pkg/
 ├── db/              ~400 lines  - Database manager & query builder
 ├── redis/           ~774 lines  - Redis manager with compression
 └── repository/      ~1,100 lines - Generic repository with auto-detection
-gensql4go.go         ~41 lines   - Main package interface
+sql4go.go         ~41 lines   - Main package interface
 ```
 
 **Key Achievements**:
@@ -291,7 +291,7 @@ gensql4go.go         ~41 lines   - Main package interface
 
 ---
 
-## 🚀 What Makes GenSQL4Go Special
+## 🚀 What Makes Sql4Go Special
 
 1. **🤖 Truly Zero-Config**: Works with existing GORM models, no manual relationship setup
 2. **📈 Proven Performance**: 28.6x speedup validated in production demo (15ms → 536µs)
@@ -300,4 +300,4 @@ gensql4go.go         ~41 lines   - Main package interface
 5. **🛡️ Production Ready**: Battle-tested, graceful fallbacks, proper error handling, type safety
 6. **📦 Complete Demo**: Full working example with Docker, dashboards, and real data
 
-*GenSQL4Go: The most developer-friendly Go database library ever built.*
+*Sql4Go: The most developer-friendly Go database library ever built.*

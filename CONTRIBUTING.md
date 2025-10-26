@@ -85,7 +85,7 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 ```
 sql4go/
-├── gensql4go.go       # Main package exports
+├── sql4go.go       # Main package exports
 ├── pkg/
 │   ├── db/            # Database manager and configuration
 │   ├── redis/         # Redis manager and caching

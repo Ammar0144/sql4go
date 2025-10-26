@@ -1282,7 +1282,7 @@ cd sql4go
 go mod download
 
 # Read the code - start here:
-# 1. gensql4go.go - Simple entry point
+# 1. sql4go.go - Simple entry point
 # 2. pkg/repository/interface.go - Core interface
 # 3. pkg/repository/generic.go - Main implementation
 

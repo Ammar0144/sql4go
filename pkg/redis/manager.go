@@ -12,11 +12,12 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 // Cache key constants for consistent key generation across the application
 const (
-	cacheKeyPrefix        = "sql4go"
+	cacheKeyPrefix        = "gensql4go"
 	cacheKeySeparator     = ":"
 	cacheDependencyPrefix = "deps"
 	cacheMetadataSuffix   = "_internal:meta"  // Internal suffix to prevent user key collisions
@@ -140,6 +141,32 @@ func (m *Manager) checkClient() error {
 		return ErrClientNotInitialized
 	}
 	return nil
+}
+
+// marshal serializes a value using the configured format (JSON or MessagePack)
+func (m *Manager) marshal(value interface{}) ([]byte, error) {
+	switch m.config.SerializationFormat {
+	case SerializationMsgPack:
+		return msgpack.Marshal(value)
+	case SerializationJSON:
+		return json.Marshal(value)
+	default:
+		// Default to MessagePack for best performance
+		return msgpack.Marshal(value)
+	}
+}
+
+// unmarshal deserializes bytes using the configured format (JSON or MessagePack)
+func (m *Manager) unmarshal(data []byte, target interface{}) error {
+	switch m.config.SerializationFormat {
+	case SerializationMsgPack:
+		return msgpack.Unmarshal(data, target)
+	case SerializationJSON:
+		return json.Unmarshal(data, target)
+	default:
+		// Default to MessagePack for best performance
+		return msgpack.Unmarshal(data, target)
+	}
 }
 
 // Get retrieves a value from cache
@@ -322,7 +349,7 @@ func (m *Manager) AddDependency(ctx context.Context, entityType string, entityID
 		return err
 	}
 
-	// Create dependency key: "sql4go:deps:customer:123"
+	// Create dependency key: "gensql4go:deps:customer:123"
 	dependencyKey := fmt.Sprintf("%s%s%s%s%s%s%v", cacheKeyPrefix, cacheKeySeparator, cacheDependencyPrefix, cacheKeySeparator, entityType, cacheKeySeparator, entityID)
 
 	// Add cache key to the set of dependencies for this entity
@@ -433,11 +460,12 @@ func (m *Manager) SetLargeWithDependencies(ctx context.Context, cacheKey string,
 	return m.AddMultipleDependencies(ctx, dependencies, cacheKey)
 }
 
-// SetJSONWithDependencies stores JSON value and registers its dependencies
-func (m *Manager) SetJSONWithDependencies(ctx context.Context, cacheKey string, value interface{}, dependencies map[string][]interface{}) error {
-	data, err := json.Marshal(value)
+// SetValueWithDependencies stores value and registers its dependencies
+// Uses configured serialization format (JSON or MessagePack)
+func (m *Manager) SetValueWithDependencies(ctx context.Context, cacheKey string, value interface{}, dependencies map[string][]interface{}) error {
+	data, err := m.marshal(value)
 	if err != nil {
-		return fmt.Errorf("failed to marshal JSON: %w", err)
+		return fmt.Errorf("failed to marshal value: %w", err)
 	}
 
 	return m.SetWithDependencies(ctx, cacheKey, data, dependencies)
@@ -477,22 +505,22 @@ func (m *Manager) GetStats(ctx context.Context) (map[string]interface{}, error) 
 	return stats, nil
 }
 
-// SetJSON stores a JSON-serializable value in cache
-func (m *Manager) SetJSON(ctx context.Context, key string, value interface{}) error {
+// SetValue stores a value in cache using the configured serialization format (JSON or MessagePack)
+func (m *Manager) SetValue(ctx context.Context, key string, value interface{}) error {
 	if err := m.checkClient(); err != nil {
 		return err
 	}
 
-	data, err := json.Marshal(value)
+	data, err := m.marshal(value)
 	if err != nil {
-		return fmt.Errorf("failed to marshal JSON: %w", err)
+		return fmt.Errorf("failed to marshal value: %w", err)
 	}
 
 	return m.Set(ctx, key, data)
 }
 
-// GetJSON retrieves and unmarshals a JSON value from cache
-func (m *Manager) GetJSON(ctx context.Context, key string, target interface{}) error {
+// GetValue retrieves and unmarshals a value from cache using the configured serialization format
+func (m *Manager) GetValue(ctx context.Context, key string, target interface{}) error {
 	if err := m.checkClient(); err != nil {
 		return err
 	}
@@ -503,11 +531,11 @@ func (m *Manager) GetJSON(ctx context.Context, key string, target interface{}) e
 		return err
 	}
 
-	if data == nil {
-		return ErrKeyNotFound
+	if err := m.unmarshal(data, target); err != nil {
+		return fmt.Errorf("failed to unmarshal value: %w", err)
 	}
 
-	return json.Unmarshal(data, target)
+	return nil
 }
 
 // Exists checks if a key exists in cache
@@ -627,18 +655,20 @@ func (m *Manager) GetLarge(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-// SetLargeJSON stores large JSON values with compression and chunking
-func (m *Manager) SetLargeJSON(ctx context.Context, key string, value interface{}) error {
-	data, err := json.Marshal(value)
+// SetLargeValue stores large values with compression and chunking
+// Uses configured serialization format (JSON or MessagePack)
+func (m *Manager) SetLargeValue(ctx context.Context, key string, value interface{}) error {
+	data, err := m.marshal(value)
 	if err != nil {
-		return fmt.Errorf("failed to marshal JSON: %w", err)
+		return fmt.Errorf("failed to marshal value: %w", err)
 	}
 
 	return m.SetLarge(ctx, key, data)
 }
 
-// GetLargeJSON retrieves and unmarshals large JSON values
-func (m *Manager) GetLargeJSON(ctx context.Context, key string, target interface{}) error {
+// GetLargeValue retrieves and unmarshals large values
+// Uses configured serialization format (JSON or MessagePack)
+func (m *Manager) GetLargeValue(ctx context.Context, key string, target interface{}) error {
 	// GetLarge handles all metrics tracking internally
 	data, err := m.GetLarge(ctx, key)
 	if err != nil {
@@ -649,7 +679,7 @@ func (m *Manager) GetLargeJSON(ctx context.Context, key string, target interface
 		return ErrKeyNotFound
 	}
 
-	return json.Unmarshal(data, target)
+	return m.unmarshal(data, target)
 }
 
 // compressData compresses data using gzip
