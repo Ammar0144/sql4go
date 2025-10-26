@@ -568,9 +568,9 @@ func (r *GenericRepository[T]) WarmCache(ctx context.Context) error {
 		return nil
 	}
 
-	// Warm up common queries
-	r.FindAll(ctx) // Cache all entities
-	r.Count(ctx)   // Cache count
+	// Warm up common queries (ignore errors - best effort)
+	_, _, _, _ = r.FindAll(ctx) // Cache all entities
+	_, _, _, _ = r.Count(ctx)   // Cache count
 
 	return nil
 }
@@ -692,11 +692,11 @@ func (r *GenericRepository[T]) extractDependenciesFromEntities(entities []T) map
 
 // invalidateEntityCaches handles cache invalidation for entity changes
 func (r *GenericRepository[T]) invalidateEntityCaches(ctx context.Context, entity T) {
-	// Invalidate all caches for this entity type
-	r.InvalidateCache(ctx)
+	// Invalidate all caches for this entity type (ignore errors - best effort)
+	_ = r.InvalidateCache(ctx)
 
-	// Invalidate specific entity dependencies
-	r.redis.InvalidateEntityDependencies(ctx, r.tableName, entity.GetPrimaryKeyValue())
+	// Invalidate specific entity dependencies (ignore errors - best effort)
+	_ = r.redis.InvalidateEntityDependencies(ctx, r.tableName, entity.GetPrimaryKeyValue())
 
 	// Handle relationship-aware invalidation
 	var relationships map[string][]RelatedEntity
@@ -709,11 +709,11 @@ func (r *GenericRepository[T]) invalidateEntityCaches(ctx context.Context, entit
 		relationships = extractRelationshipsFromEntity(entity, entity.GetPrimaryKeyValue())
 	}
 
-	// Invalidate all related entity caches
+	// Invalidate all related entity caches (ignore errors - best effort)
 	for _, relatedEntities := range relationships {
 		for _, related := range relatedEntities {
 			if related.EntityID != nil {
-				r.redis.InvalidateEntityDependencies(ctx, related.EntityType, related.EntityID)
+				_ = r.redis.InvalidateEntityDependencies(ctx, related.EntityType, related.EntityID)
 			}
 		}
 	}
